@@ -1,0 +1,240 @@
+function CHiME_baseline(test_dev_mode, snr, isol_file_name)
+reset(RandStream.getGlobalStream);
+
+% Add FASST directory to PATH
+fasst_matlab_dir = '@FASST_MATLAB_DIR@';
+if ~exist('fasst_writeXML', 'file')
+    addpath(fasst_matlab_dir);
+end
+
+% Define absolute directories
+CHiME_data_dir = 'data/';
+CHiME_models_dir = 'models/';
+CHiME_results_dir = 'results/';
+
+embedded_dir = [CHiME_data_dir, 'aasp-chime-grid/', test_dev_mode, '/embedded/'];
+isolated_dir = [CHiME_data_dir, 'aasp-chime-grid/', test_dev_mode, '/isolated/', snr, '/'];
+annotations_dir = [CHiME_data_dir, 'annotationFiles/', test_dev_mode, '/'];
+if ~exist([CHiME_results_dir, test_dev_mode], 'dir')
+    mkdir([CHiME_results_dir, test_dev_mode]);
+end
+if ~exist([CHiME_results_dir, test_dev_mode, '/', snr], 'dir')
+    mkdir([CHiME_results_dir, test_dev_mode, '/', snr]);
+end
+tmp_dir = [CHiME_results_dir, test_dev_mode, '/', snr, '/', isol_file_name(1:end-4)];
+if ~exist(tmp_dir, 'dir')
+    mkdir(tmp_dir);
+end
+
+wlen = 1024;
+back_num_states = 16;
+back_nsrc=2;
+iter_num_back_train = 30;
+iter_num_ssep = 50;
+background_max_len = 10; % seconds, converted into samples below
+
+% Generate an XML file with wlen
+data.wlen = wlen;
+xml_fname = [tmp_dir, '/wlen.xml'];
+fasst_writeXML(xml_fname, data);
+
+% Compute mixture covariance matrix
+bin_fname = [tmp_dir, '/Rx_isolated.bin'];
+fasst_compute_mixture_covariance_matrix([isolated_dir, isol_file_name], xml_fname, bin_fname);
+Rx_isolated = fasst_loadRx(bin_fname);
+[F, N, I, ~] = size(Rx_isolated);
+
+% Segment background
+[~, fs] = wavread([isolated_dir, isol_file_name]);
+background_max_len = background_max_len * fs;
+audio_segments = segment_background(background_max_len, embedded_dir, annotations_dir, snr, isol_file_name);
+
+% Compute background covariance matrix
+audio_fname = [tmp_dir, '/segment.wav'];
+bin_fname = [tmp_dir, '/segment.bin'];
+Rx_back = [];
+for i = 1:size(audio_segments, 2)
+    wavwrite(audio_segments{i}, audio_fname);
+    fasst_compute_mixture_covariance_matrix(audio_fname, xml_fname, bin_fname);
+    Rx_back = [Rx_back, fasst_loadRx(bin_fname)];
+end
+
+% Initialize background spectral model
+back_src = cell(back_nsrc);
+dsp_back = VQ((Rx_back(:,:,1,1)+Rx_back(:,:,2,2)).^.5, log2(back_num_states)).^2;
+back_num_states = size(dsp_back, 2);
+for j = 1:back_nsrc
+    back_src{j}.Wex.data = dsp_back;
+    back_src{j}.Wex.adaptability = 'free';
+    back_src{j}.Hex.data = ones(back_num_states, size(Rx_back,2));
+    back_src{j}.Hex.adaptability = 'free';
+end;
+
+% Initialize background spatial model
+dist=.2; % inter-microphone distance: 15.2cm for KEMAR, unknown for B&K HATS
+c=343;
+angles=acos(1-(0:back_nsrc)/back_nsrc*2);
+for j = 1:back_nsrc
+    back_src{j}.A.mixingType = 'conv';
+    back_src{j}.A.adaptability = 'free';
+    back_src{j}.A.data = [];
+    for f=1:F,
+        if f==1 % null frequency, makes sense for the STFT only
+            R=eye(2)/back_nsrc;
+        else
+            freq=.5*fs*(f-1)/(F-1); % bin frequency in Hz
+            corr=(exp(-2*1i*pi*freq*dist/c*cos(angles(j+1)))-exp(-2*1i*pi*freq*dist/c*cos(angles(j))))/(4*1i*pi*freq*dist/c);
+            R=[1/back_nsrc corr; conj(corr) 1/back_nsrc];
+        end
+        [V,D]=eigs(R);
+        back_src{j}.A.data(:,:,f) = V*sqrt(D);
+    end
+end
+
+% Scale spatial parameter
+data_power = 0;
+for i = 1:I
+    data_power = data_power + mean(mean(Rx_back(:,:,i,i))) / I;
+end;
+for j = 1:back_nsrc
+    A_power = mean(abs(back_src{j}.A.data(:)).^2);
+    V = back_src{j}.Wex.data * back_src{j}.Hex.data;
+    V_power = mean(V(:));
+    model_power = A_power * V_power;
+    back_src{j}.A.data = back_src{j}.A.data * sqrt(data_power / model_power);
+end;
+
+% Run EM algorithm
+background.sources = back_src;
+background.wlen = wlen;
+background.iterations = iter_num_back_train;
+fasst_writeXML([tmp_dir, '/background.xml'], background);
+fasst_writeRx([tmp_dir, '/Rx_back.bin'], Rx_back);
+fasst_estimate_source_parameters([tmp_dir, '/background.xml'], [tmp_dir, '/Rx_back.bin'], [tmp_dir, '/background.xml.new']);
+
+% Normalize the parameters properly
+background = fasst_loadXML([tmp_dir, '/background.xml.new']);
+back_src = background.sources;
+for j=1:back_nsrc,
+    for f=1:F,
+        A=back_src{j}.A.data(:,:,f);
+        norm=real(trace(A*A'));
+        back_src{j}.A.data(:,:,f)=A/sqrt(norm);
+        back_src{j}.Wex.data(f,:)=norm*back_src{j}.Wex.data(f,:);
+    end
+    for k=1:back_num_states,
+        norm=sum(back_src{j}.Wex.data(:,k));
+        back_src{j}.Wex.data(:,k)=back_src{j}.Wex.data(:,k)/norm;
+        back_src{j}.Hex.data(k,:)=norm*back_src{j}.Hex.data(k,:);
+    end
+end
+
+% Adapt background time activations to target
+for j=1:back_nsrc,
+    back_src{j}.Hex.data = mean(back_src{j}.Hex.data,2)*ones(1,N);
+end
+
+% Initialize target model
+load([CHiME_models_dir, 'full_rank_filters.mat'], 'spat_comps');
+target.A.data = spat_comps;
+target.A.adaptability = 'fixed';
+target.A.mixingType = 'conv';
+speaker_id = str2double(isol_file_name(2:end-11));
+load([CHiME_models_dir, 'speaker', num2str(speaker_id), '.mat'], 'dsp_speaker', 'wei_speaker');
+target.Wex.data = dsp_speaker;
+target.Wex.adaptability = 'fixed';
+target.Hex.data = wei_speaker*ones(1,N);
+target.Hex.adaptability = 'free';
+target.name = isol_file_name(1:end-4);
+
+% Run EM algorithm
+mixture.sources{1} = target;
+mixture.sources{2} = back_src{1};
+mixture.sources{3} = back_src{2};
+mixture.wlen = wlen;
+mixture.iterations = iter_num_ssep;
+fasst_writeXML([tmp_dir, '/mixture.xml'], mixture);
+fasst_estimate_source_parameters([tmp_dir, '/mixture.xml'], [tmp_dir, '/Rx_isolated.bin'], [tmp_dir, '/mixture.xml.new']);
+
+% Source separation
+results_subdir = [CHiME_results_dir, test_dev_mode, '/', snr, '/'];
+fasst_estimate_sources([isolated_dir, isol_file_name], [tmp_dir, '/mixture.xml.new'], results_subdir);
+end
+
+function audio_segments = segment_background(background_max_len, embedded_dir, annotations_dir, snr, isol_file_name)
+% Locate within the continuous background
+[isolated_names, full_names, beg_samp, len_in_samp, ~, ~, ~, ~, ~] = textread([annotations_dir, snr, '_embeddedAnnotations16000.lst'], '%s%s%d%d%f%f%f%d%d');
+ind_found_flag = 0;
+for i = 1:length(isolated_names)
+    if strcmp(isolated_names{i}, isol_file_name(1:end-4))
+        if ind_found_flag
+            error('Index is found twice');
+        end
+        ind = i;
+        ind_found_flag = 1;
+    end
+end
+if ~ind_found_flag
+    error('Index is not found');
+end
+embedded_file_name = sprintf('%s.wav', full_names{ind});
+isolated_beg = beg_samp(ind) + 1;
+isolated_end = beg_samp(ind) + len_in_samp(ind);
+embedded_size = wavread([embedded_dir, embedded_file_name], 'size');
+
+% Locate the closest utterances within the continuous background
+[full_names, beg_samp, len_in_samp, ~, ~] = textread([annotations_dir, 'all_annotations.lst'], '%s%d%d%s%s');
+background_beg = 1;
+background_end = [];
+for i = 1:length(full_names)
+    if strcmp(full_names{i}, embedded_file_name(1:end-4))
+        background_beg = [background_beg, beg_samp(i) + len_in_samp(i) + 1];
+        background_end = [background_end, beg_samp(i)];
+    end
+end
+background_end = [background_end, embedded_size(1)];
+useful_inds = find(background_end > background_beg);
+background_end = background_end(useful_inds);
+background_beg = background_beg(useful_inds);
+background_before_beg = background_beg(background_beg < isolated_beg);
+background_before_end = background_end(background_end < isolated_end);
+background_before_beg = background_before_beg(end:-1:1);
+background_before_end = background_before_end(end:-1:1);
+background_after_beg = background_beg(background_beg > isolated_beg);
+background_after_end = background_end(background_end > isolated_end);
+
+% Load background signal and compute TF transform
+back_before_len = sum(background_before_end - background_before_beg + 1);
+back_after_len = sum(background_after_end - background_after_beg + 1);
+background_max_len_2 = round(background_max_len / 2);
+back_before_len_to_read = min(background_max_len_2, back_before_len);
+back_after_len_to_read = min(background_max_len_2, back_after_len);
+if (back_before_len_to_read < background_max_len_2) && (back_after_len_to_read == background_max_len_2)
+    back_after_len_to_read = min(background_max_len - back_before_len_to_read, back_after_len);
+end
+if (back_after_len_to_read < background_max_len_2) && (back_before_len_to_read == background_max_len_2)
+    back_before_len_to_read = min(background_max_len - back_after_len_to_read, back_before_len);
+end
+len_to_read = back_before_len_to_read;
+segm_ind = 1;
+i = 1;
+audio_segments = {};
+while len_to_read > 0
+    beg_to_read = background_before_beg(segm_ind);
+    end_to_read = min(background_before_end(segm_ind), background_before_beg(segm_ind) + len_to_read - 1);
+    len_to_read = len_to_read - (end_to_read - beg_to_read + 1);
+    audio_segments{i} = wavread([embedded_dir, embedded_file_name], [beg_to_read, end_to_read]);
+    i = i + 1;
+    segm_ind = segm_ind + 1;
+end
+len_to_read = back_after_len_to_read;
+segm_ind = 1;
+while len_to_read > 0
+    beg_to_read = background_after_beg(segm_ind);
+    end_to_read = min(background_after_end(segm_ind), background_after_beg(segm_ind) + len_to_read - 1);    
+    len_to_read = len_to_read - (end_to_read - beg_to_read + 1);
+    audio_segments{i} = wavread([embedded_dir, embedded_file_name], [beg_to_read, end_to_read]);
+    i = i + 1;
+    segm_ind = segm_ind + 1;
+end
+end

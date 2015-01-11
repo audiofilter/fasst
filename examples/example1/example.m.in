@@ -1,0 +1,66 @@
+% Cleaning
+clear data;
+clear sources;
+
+% Add FASST directory to PATH
+fasst_matlab_dir = '@FASST_MATLAB_DIR@';
+if ~exist('fasst_writeXML', 'file')
+    addpath(fasst_matlab_dir);
+end
+
+% Read audio file to know its size
+audio_fname = 'Shannon_Hurley__Sunrise__inst__mix.wav';
+x = wavread(audio_fname)';
+[I,nsampl] = size(x);
+
+% Compute STFT spectrogram size
+wlen = 1024;
+F = wlen/2 + 1;
+N = ceil(nsampl/wlen*2);
+
+%% Define sources
+J = 3; % Number of sources
+K = 4; % NFM rank
+for j = 1:J
+    sources{j}.A.adaptability = 'free';
+    sources{j}.A.mixingType = 'inst';
+    sources{j}.Wex.data = 0.75 * abs(randn(F, K)) + 0.25 * ones(F, K);
+    sources{j}.Wex.adaptability = 'free';
+    sources{j}.Hex.data = 0.75 * abs(randn(K, N)) + 0.25 * ones(K, N);
+    sources{j}.Hex.adaptability = 'free';
+end
+sources{1}.A.data = [sin(pi/8); cos(pi/8)];
+sources{2}.A.data = [sin(pi/4); cos(pi/4)];
+sources{3}.A.data = [sin(3*pi/8); cos(3*pi/8)];
+
+sources{1}.name = 'first';
+sources{2}.name = 'second';
+sources{3}.name = 'third';
+
+for j = 1:J
+    sources{j}.wiener.a = 0;% Default = 0 (dB)
+    sources{j}.wiener.b = 0;% Default = 0 (inside [0,1])
+    sources{j}.wiener.c1 = 0;% Default = 0 (Positive integer)
+    sources{j}.wiener.c2 = 0;% Default = 0 (Positive integer)
+    sources{j}.wiener.d = -Inf;% Default = -Inf (dB)
+end
+
+% Define data structure
+data.tfr_type = 'STFT'; % Optional
+data.sources = sources;
+data.wlen = wlen;
+data.iterations = 200;
+
+%% Write to XML
+xml_fname = 'sources.xml';
+fasst_writeXML(xml_fname, data);
+
+%% Call executables
+disp('Input time-frequency representation');
+fasst_compute_mixture_covariance_matrix(audio_fname, xml_fname, 'Rx.bin')
+
+% Run EM algorithm
+fasst_estimate_source_parameters(xml_fname, 'Rx.bin', [xml_fname '.new'])
+
+disp('Computation of the spatial source images');
+fasst_estimate_sources(audio_fname, [xml_fname '.new'], 'result')

@@ -1,0 +1,373 @@
+import numpy as np
+import os
+import subprocess
+import xml.etree.ElementTree as ET
+import xml.dom.minidom
+
+# Define the location for fasst executables
+fasst_executable_dir = '@FASST_EXECUTABLE_DIR@'
+
+def compute_mixture_covariance_matrix(audio_fname, xml_fname, binary_fname):
+    prog = os.path.join(fasst_executable_dir, 'comp-rx')
+    cmd = [prog, audio_fname, xml_fname, binary_fname]
+    if subprocess.call(cmd) is not 0:
+        raise Exception('comp-rx did exit with an error')
+
+def estimate_source_parameters(input_xml_fname, binary_fname, output_xml_fname):
+    prog = os.path.join(fasst_executable_dir, 'model-estimation')
+    cmd = [prog, input_xml_fname, binary_fname, output_xml_fname]
+    if subprocess.call(cmd) is not 0:
+        raise Exception('model-estimation did exit with an error')
+
+def estimate_sources(audio_fname, xml_fname, output_dirname):
+    if not os.path.isdir(output_dirname):
+        os.makedirs(output_dirname)
+    prog = os.path.join(fasst_executable_dir, 'source-estimation')
+    cmd = [prog, audio_fname, xml_fname, output_dirname]
+    if subprocess.call(cmd) is not 0:
+        raise Exception('source-estimation did exit with an error')
+
+def writeMixingParameter(sourceNode, A):
+    """
+    >>> node = ET.Element('root')
+    >>> A = {}
+    >>> A['adaptability'] = 'free'
+    >>> A['mixingType'] = 'inst'
+    >>> A['data'] = np.array([[1,2,3],[4,5,6]])
+    >>> writeMixingParameter(node, A)
+    >>> node.find('A').get('adaptability') == A['adaptability']
+    True
+    >>> node.find('A').get('mixing_type')
+    'inst'
+    >>> int(node.find('A').findtext('ndims'))
+    2
+    >>> node.find('A').findtext('type')
+    'real'
+    >>> node.find('A').findtext('data')
+    '1 4 2 5 3 6'
+
+    >>> node = ET.Element('root')
+    >>> A = {}
+    >>> A['adaptability'] = 'free'
+    >>> A['mixingType'] = 'inst'
+    >>> A['data'] = np.array([1])
+    >>> writeMixingParameter(node, A)
+    >>> int(node.find('A').findtext('ndims'))
+    2
+    >>> node.find('A').findtext('type')
+    'real'
+    >>> node.find('A').findtext('data')
+    '1'
+
+    >>> node = ET.Element('root')
+    >>> A = {}
+    >>> A['adaptability'] = 'free'
+    >>> A['mixingType'] = 'conv'
+    >>> A['data'] = np.tile(np.array([[1,2,3],[4,5,6]])[:,:,np.newaxis], [1,1,4])
+    >>> writeMixingParameter(node, A)
+    >>> node.find('A').get('mixing_type')
+    'conv'
+    >>> int(node.find('A').findtext('ndims'))
+    3
+    >>> node.find('A').findtext('type')
+    'real'
+    >>> node.find('A').findtext('data')
+    '1 4 2 5 3 6 1 4 2 5 3 6 1 4 2 5 3 6 1 4 2 5 3 6'
+
+    >>> node = ET.Element('root')
+    >>> A = {}
+    >>> A['adaptability'] = 'free'
+    >>> A['mixingType'] = 'conv'
+    >>> A['data'] = np.tile(np.array([[1+2j,3+4j,5+6j],[7+8j,9+10j,11+12j]])[:,:,np.newaxis], [1,1,4])
+    >>> writeMixingParameter(node, A)
+    >>> node.find('A').get('mixing_type')
+    'conv'
+    >>> int(node.find('A').findtext('ndims'))
+    3
+    >>> node.find('A').findtext('type')
+    'complex'
+    >>> node.find('A').findtext('data')
+    '1.0 7.0 3.0 9.0 5.0 11.0 2.0 8.0 4.0 10.0 6.0 12.0 1.0 7.0 3.0 9.0 5.0 11.0 2.0 8.0 4.0 10.0 6.0 12.0 1.0 7.0 3.0 9.0 5.0 11.0 2.0 8.0 4.0 10.0 6.0 12.0 1.0 7.0 3.0 9.0 5.0 11.0 2.0 8.0 4.0 10.0 6.0 12.0 '
+    """
+    node = ET.SubElement(sourceNode, 'A')
+    # Attributes
+    node.set('adaptability', A['adaptability'])
+    node.set('mixing_type', A['mixingType'])
+
+    # Type
+    if np.iscomplexobj(A['data']):
+        ET.SubElement(node, 'type').text = 'complex'
+    else:
+        ET.SubElement(node, 'type').text = 'real'
+
+    # Dims & data
+    if len(np.shape(A['data'])) == 0:
+        raise Exception('Mixing parameter should be an array')
+    elif len(np.shape(A['data'])) == 1 and np.shape(A['data'])[0] == 1:
+        ET.SubElement(node, 'ndims').text = '2'
+        ET.SubElement(node, 'dim').text = '1'
+        ET.SubElement(node, 'dim').text = '1'
+        ET.SubElement(node, 'data').text = str(A['data'][0])
+    else:
+        ET.SubElement(node, 'ndims').text = str(A['data'].ndim)
+        for dim in A['data'].shape:
+            ET.SubElement(node, 'dim').text = str(dim)
+            if np.iscomplexobj(A['data']):
+                data = ''
+                for k in range(A['data'].shape[2]):
+                    for j in range(A['data'].shape[1]):
+                        for i in range(A['data'].shape[0]):
+                            data += str(A['data'][i,j,k].real) + ' '
+                    for j in range(A['data'].shape[1]):
+                        for i in range(A['data'].shape[0]):
+                            data += str(A['data'][i,j,k].imag) + ' '
+                ET.SubElement(node, 'data').text = data
+            else:
+                data = ' '.join([str(e) for e in A['data'].T.flat])
+                ET.SubElement(node, 'data').text = data
+
+def writeNonNegMatrix(sourceNode, matrix, matrixName):
+    """
+    >>> node = ET.Element('root')
+    >>> mat = {}
+    >>> mat['adaptability'] = 'free'
+    >>> mat['data'] = np.array([[1,2,3],[4,5,6]])
+    >>> writeNonNegMatrix(node, mat, 'Wex')
+    >>> int(node.find('Wex').findtext('rows'))
+    2
+    >>> int(node.find('Wex').findtext('cols'))
+    3
+    >>> node.find('Wex').findtext('data')
+    '1 4\\n2 5\\n3 6'
+    """
+    if ((matrix.has_key('adaptability') and not matrix.has_key('data')) or
+            (not matrix.has_key('adaptability') and matrix.has_key('data'))):
+        raise Exception('You must define adaptability and data for each parameter')
+
+    node = ET.SubElement(sourceNode, matrixName)
+
+    if (matrix.has_key('adaptability') and matrix.has_key('data')):
+        # Attributes
+        node.set('adaptability', matrix['adaptability'])
+        # Shape
+        (rows, cols) = matrix['data'].shape
+        ET.SubElement(node, 'rows').text = str(rows)
+        ET.SubElement(node, 'cols').text = str(cols)
+        # Data
+        data = '\n'.join([' '.join([str(e) for e in matrix['data'][:,i]]) for i in range(cols)])
+        ET.SubElement(node, 'data').text = data
+    else:
+        node.set('adaptability', 'fixed')
+        ET.SubElement(node, 'rows').text = str(matrix['dim'])
+        ET.SubElement(node, 'cols').text = str(matrix['dim'])
+        ET.SubElement(node, 'data').text = 'eye'
+
+def writeSpectralPower(node, source, suffix):
+    keys = [prefix + suffix for prefix in ['W', 'U', 'G', 'H']]
+    for key in keys:
+        if source.has_key(key):
+            dim = source[key]['data'].shape[0]
+            break
+    for key in keys:
+        if source.has_key(key):
+            writeNonNegMatrix(node, source[key], key)
+            dim = source[key]['data'].shape[1]
+        else:
+            eye = {}
+            eye['dim'] = dim
+            writeNonNegMatrix(node, eye, key)
+
+def writeWienerParam(sourceNode, wiener):
+    node = ET.SubElement(sourceNode, 'wiener')
+    if wiener.has_key('a'):
+        ET.SubElement(node, 'a').text = str(wiener['a'])
+
+    if wiener.has_key('b'):
+        ET.SubElement(node, 'b').text = str(wiener['b'])
+
+    if wiener.has_key('c1'):
+        ET.SubElement(node, 'c1').text = str(wiener['c1'])
+
+    if wiener.has_key('c2'):
+        ET.SubElement(node, 'c2').text = str(wiener['c2'])
+
+    if wiener.has_key('d'):
+        ET.SubElement(node, 'd').text = str(wiener['d'])
+
+def writeSource(root, source):
+    if (not source.has_key('Wex') and
+            not source.has_key('Uex') and
+            not source.has_key('Gex') and
+            not source.has_key('Hex')):
+        raise Exception()
+
+    node = ET.SubElement(root, 'source')
+
+    if source.has_key('name'):
+        node.set('name', source['name'])
+
+    if source.has_key('wiener'):
+		writeWienerParam(node, source['wiener'])
+
+    writeMixingParameter(node, source['A'])
+    writeSpectralPower(node, source, 'ex')
+    if (source.has_key('Wft') or
+            source.has_key('Uft') or
+            source.has_key('Gft') or
+            source.has_key('Hft')):
+        writeSpectralPower(node, source, 'ft')
+
+def writeXML(fname, data):
+    # Generate XML
+    root = ET.Element('sources')
+
+    if data.has_key('iterations'):
+        ET.SubElement(root, 'iterations').text = str(data['iterations'])
+    if data.has_key('tfr_type'):
+        ET.SubElement(root, 'tfr_type').text = str(data['tfr_type'])
+    ET.SubElement(root, 'wlen').text = str(data['wlen'])
+    if data.has_key('nbin'):
+        ET.SubElement(root, 'nbin').text = str(data['nbin'])
+    
+    for source in data['sources']:
+        writeSource(root, source)
+
+    # Write XML to file
+    with open(fname, 'w') as f:
+        f.write(xml.dom.minidom.parseString(ET.tostring(root)).toprettyxml())
+
+def readMixingParameter(node):
+    """
+    >>> ref = np.array([[1.,2.,3.],[4.,5.,6.]])
+    >>> read = readMixingParameter(ET.XML('''
+    ... <A adaptability='fixed' mixing_type='inst'>
+    ... <ndims>2</ndims>
+    ... <dim>2</dim>
+    ... <dim>3</dim>
+    ... <type>real</type>
+    ... <data>1 4 2 5 3 6</data>
+    ... </A>'''))
+    >>> (read['data'] == ref).all()
+    True
+    >>> read['adaptability']
+    'fixed'
+    >>> read['mixingType']
+    'inst'
+
+    >>> ref = np.tile(np.array([[1,2,3],[4,5,6]])[:,:,np.newaxis], [1,1,4])
+    >>> read = readMixingParameter(ET.XML('''
+    ... <A adaptability="fixed" mixing_type="conv">
+    ... <ndims>3</ndims>
+    ... <dim>2</dim>
+    ... <dim>3</dim>
+    ... <dim>4</dim>
+    ... <type>real</type>
+    ... <data>1 4 2 5 3 6 1 4 2 5 3 6 1 4 2 5 3 6 1 4 2 5 3 6</data>
+    ... </A>'''))
+    >>> (read['data'] == ref).all()
+    True
+    >>> read['mixingType']
+    'conv'
+
+    >>> ref = np.tile(np.array([[1+2j,3+4j,5+6j],[7+8j,9+10j,11+12j]])[:,:,np.newaxis], [1,1,4])
+    >>> read = readMixingParameter(ET.XML('''
+    ... <A adaptability="fixed" mixing_type="conv">
+    ... <ndims>3</ndims>
+    ... <dim>2</dim>
+    ... <dim>3</dim>
+    ... <dim>4</dim>
+    ... <type>complex</type>
+    ... <data>1 7 3 9 5 11 2 8 4 10 6 12 1 7 3 9 5 11 2 8 4 10 6 12 1 7 3 9 5 11 2 8 4 10 6 12 1 7 3 9 5 11 2 8 4 10 6 12</data>
+    ... </A>'''))
+    >>> (read['data'] == ref).all()
+    True
+    """
+    A = {}
+    for k in node.keys():
+        A[k] = node.get(k)
+    A['mixingType'] = A['mixing_type']
+    del A['mixing_type']
+
+    dim = [];
+    for e in node.findall('dim'):
+        dim.append(int(e.text))
+    s = node.find('data').text.split()
+    if node.find('type').text == 'real':
+        A['data'] = np.reshape(np.array(map(float, s)), dim, order='F')
+    else:
+        buf = np.array(map(float, s))
+        A['data'] = np.zeros(dim, dtype=complex)
+        s = dim[0] * dim[1]
+        d = [dim[0], dim[1]]
+        for i in range(dim[-1]):
+            inf = 2*s*i
+            sup = s*(2*(i+1)-1)
+            real_part = np.reshape(buf[inf:sup], d, order='F')
+
+            inf = s*(2*(i+1)-1)
+            sup = 2*s*(i+1)
+            imag_part = np.reshape(buf[inf:sup], d, order='F')
+            A['data'][:,:,i] = real_part + imag_part*1j
+    return A
+
+def readNonNegMatrix(node):
+    """
+    >>> ref = np.array([[1.,2.,3.],[4.,5.,6.]])
+    >>> read = readNonNegMatrix(ET.XML('''
+    ... <Wex adaptability='fixed'>
+    ... <rows>2</rows>
+    ... <cols>3</cols>
+    ... <data>1 4
+    ... 2 5
+    ... 3 6</data>
+    ... </Wex>'''))
+    >>> (read['data'] == ref).all()
+    True
+    >>> read['adaptability']
+    'fixed'
+    """
+    mat = {}
+    for k in node.keys():
+        mat[k] = node.get(k)
+    rows = int(node.findtext('rows'))
+    cols = int(node.findtext('cols'))
+    s = node.find('data').text
+    mat['data'] = np.array(map(float, s.split())).reshape(rows, cols, order='F')
+    return mat
+
+def readSource(node):
+    source = {}
+    if node.get('name') is not None:
+        source['name'] = node.get('name')
+
+    source['A'] = readMixingParameter(node.find('A'))
+    for param in ['Wex', 'Uex', 'Gex', 'Hex']:
+        if node.find(param).findtext('data').strip() != 'eye':
+            source[param] = readNonNegMatrix(node.find(param));
+    if node.find('Wft') is not None:
+        for param in ['Wft', 'Uft', 'Gft', 'Hft']:
+            if node.find(param).findtext('data').strip() != 'eye':
+                source[param] = readNonNegMatrix(node.find(param));
+    return source
+
+def loadXML(fname):
+    with open(fname, 'r') as f:
+        root = ET.XML(f.read())
+
+    data = {}
+    data['wlen'] = int(root.findtext('wlen'))
+
+    sources = root.findall('source')
+    data['sources'] = []
+    for sourceNode in sources:
+        data['sources'].append(readSource(sourceNode))
+
+    return data
+
+if __name__ == "__main__":
+    import doctest
+    import sys
+    (failure_count, test_count) = doctest.testmod()
+    if failure_count != 0:
+      # Exit with non zero
+      sys.exit(1)
