@@ -1,17 +1,7 @@
 FASST Documentation {#mainpage}
 ===
 
-[TOC]
-
-This is the home page for the C++ implementation of the FASST toolbox. The content of this page is a quickstart guide for users. The other pages of this documentation describe the internal structure of FASST and are intended for developers.
-
-In case you have any trouble and want to contact a human, you can send an email to fasst-support@inria.fr. We will do our best to answer quickly (we like feedback too).
-
-# Download {#download}
-* [Source in tar.gz format](files/fasst-2.1.0.tar.gz)
-* [Source in zip format](files/fasst-2.1.0.zip)
-* [Windows installer (32-bit)](files/fasst-2.1.0-win32.zip)
-* [Windows installer (64-bit)](files/fasst-2.1.0-win64.zip)
+This is a copy of FASST toolbox modified to build with QT5 on Mac OS X
 
 # License {#license}
 This software is released under the Q Public License Version 1.0. Please find a copy of the license at http://opensource.org/licenses/QPL-1.0.
@@ -28,17 +18,6 @@ If you use FASST and obtain scientific results that you publish, please acknowle
 \endhtmlonly
 
 
-# Build FASST {#build-fasst}
-The build has been tested and is known to succeed on the following systems:
-
-* Ubuntu 12.04 (gcc, clang and Intel)
-* CentOS 6.3 (gcc)
-* OS X 10.7
-* Windows XP (Visual Studio 2010)
-* Windows 7 (Visual Studio 2010 & 2012)
-
-\note If you use Windows, we recommend that you use one of the installers we provide, skip this section and directly [run the first example](\ref run-the-first-example). Nevertheless, if you want to build on Windows anyway, we have [a dedicated page for this](\ref build-windows).
-
 ## Install dependencies {#install-dependencies}
 FASST has the following dependencies:
 
@@ -47,27 +26,6 @@ FASST has the following dependencies:
 * [libsndfile](http://www.mega-nerd.com/libsndfile/) for the WAV file I/Os
 * [Eigen](http://eigen.tuxfamily.org/) for the linear algebra and the FFT
 * (optional) [numpy](http://www.numpy.org/) for python scripts
-
-### On GNU/Linux {#install-dependencies-linux}
-On apt-based GNU/Linux distributions (_eg._ Ubuntu), use the following command:
-
-    sudo apt-get install cmake libqt4-dev libsndfile1-dev python-numpy
-
-On rpm-based GNU/Linux distributions (_eg._ CentOS), use the following command:
-
-    sudo yum install cmake qt-devel libsndfile-devel numpy
-
-You can choose to install Eigen with the package management system, but we recommend to install it manually for two reason: the packages provided by distributions are old, and the manual installation is very quick.
-
-Simply enter the following commands:
-
-    wget http://bitbucket.org/eigen/eigen/get/3.2.0.tar.bz2
-    tar xjf 3.2.0.tar.bz2
-    cd eigen-eigen-*
-    mkdir build
-    cd build
-    cmake ..
-    sudo make install
 
 ### On OS X {#install-dependencies-mac}
 This guide assumes that you use Apple's developer tools and [the brew package manager](http://brew.sh/) (which is trivial to install and simplifies a lot of things for developers on OS X).
@@ -97,11 +55,6 @@ The first example script is provided in Python and MATLAB. It separates three mu
 #### On GNU/Linux and OS X {#run-the-python-example-linux}
 
     python example.py
-
-#### On Windows {#run-the-python-example-windows}
-On Windows, we recommend that you install the pythonxy distribution: https://code.google.com/p/pythonxy/.
-
-Then you can easily run the script by double-clicking it.
 
 ### With MATLAB {#run-the-matlab-example}
 To run the MATLAB example, simply `cd` to the example directory and type `example`
