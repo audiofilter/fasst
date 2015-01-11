@@ -1,24 +1,12 @@
-FASST Documentation {#mainpage}
+FASST Documentation
 ===
 
 This is a copy of FASST toolbox modified to build with QT5 on Mac OS X
 
-# License {#license}
+# License
 This software is released under the Q Public License Version 1.0. Please find a copy of the license at http://opensource.org/licenses/QPL-1.0.
 
-# Reference {#reference}
-If you use FASST and obtain scientific results that you publish, please acknowledge the usage of FASST by referencing the following articles:
-
-\htmlonly
-<iframe src="https://haltools.inria.fr/Public/afficheRequetePubli.php?titre_exp=A+General+Flexible+Framework+for+the+Handling+of+Prior+Information+in+Audio+Source+Separation&annee_publideb=2012&CB_auteur=oui&CB_titre=oui&CB_article=oui&langue=Anglais&tri_exp=annee_publi&tri_exp2=typdoc&tri_exp3=date_publi&ordre_aff=TA&Fen=Aff&css=../css/styles_publicationsHAL_frame.css"  frameborder="0" width="800" height="200">
-</iframe>
-<br>
-<iframe src="https://haltools.inria.fr/Public/afficheRequetePubli.php?titre_exp=The+Flexible+Audio+Source+Separation+Toolbox+Version+2.0&CB_auteur=oui&CB_titre=oui&CB_article=oui&langue=Anglais&tri_exp=annee_publi&tri_exp2=typdoc&tri_exp3=date_publi&ordre_aff=TA&Fen=Aff&css=../css/styles_publicationsHAL_frame.css" frameborder="0" width="800" height="220">
-</iframe>
-\endhtmlonly
-
-
-## Install dependencies {#install-dependencies}
+## Install dependencies
 FASST has the following dependencies:
 
 * [CMake](http://www.cmake.org/) to build
@@ -27,7 +15,7 @@ FASST has the following dependencies:
 * [Eigen](http://eigen.tuxfamily.org/) for the linear algebra and the FFT
 * (optional) [numpy](http://www.numpy.org/) for python scripts
 
-### On OS X {#install-dependencies-mac}
+### On OS X 
 This guide assumes that you use Apple's developer tools and [the brew package manager](http://brew.sh/) (which is trivial to install and simplifies a lot of things for developers on OS X).
 
 Install all the dependencies with the following commands:
@@ -35,31 +23,29 @@ Install all the dependencies with the following commands:
     brew install cmake qt libsndfile eigen python
     pip install numpy
 
-## Build {#build}
+## Build
 
-    cd fasst-*
     mkdir build
     cd build
     cmake ..
     make
 
-# Run the examples {#run-the-examples}
-\note If you built FASST from source, example scripts will be located in the build/examples directory.
+# Run the examples 
+Example scripts will be located in the build/examples directory.
 
 The typical workflow is to use some scripts to initialize the source model, write it to an XML file and call FASST binaries.
 
-## Run the first example {#run-the-first-example}
+## Run the first example
 The first example script is provided in Python and MATLAB. It separates three musical sources from an instantaneous mixture.
 
-### With Python {#run-the-python-example}
-#### On GNU/Linux and OS X {#run-the-python-example-linux}
+### With Python 
 
     python example.py
 
-### With MATLAB {#run-the-matlab-example}
+### With MATLAB 
 To run the MATLAB example, simply `cd` to the example directory and type `example`
 
-## Run the second example {#run-the-second-example}
+## Run the second example 
 The second example script is provided in MATLAB. It performs source separation on noisy speech data from the first track of the 2nd CHiME challenge (http://spandh.dcs.shef.ac.uk/chime_challenge/). To run this script, you will need:
 * The development and/or the test dataset downloadable at http://spandh.dcs.shef.ac.uk/chime_challenge/chime2_task1.html
 * The following archive containing additional annotation files and models: [tar](files/CHiME_baseline.tar.gz) and [zip](files/CHiME_baseline.zip)
@@ -74,7 +60,7 @@ The script takes 3 arguments:
 # Write your own script {#write-your-own-script}
 As a prerequisite, you need to be familiar with the FASST source model. If not, you can refer to [this paper](http://hal.inria.fr/hal-00626962/) where it is fully described.
 
-\note You have to be aware that some features that are present in the MATLAB version of FASST are still not implemented, here is a quick list:
+You have to be aware that some features that are present in the MATLAB version of FASST are still not implemented, here is a quick list:
 * ERB transform
 * GMM and HMM spectral models
 * Partially-adaptative spectral parameters
